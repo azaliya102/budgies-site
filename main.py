@@ -39,7 +39,7 @@ def get_db():
         db.close()
 
 @app.post("/add_budgie")
-async def add_budgie(budgie: BudgieInput, db: Session = Depends(get_db)):
+def add_budgie(budgie: BudgieInput, db: Session = Depends(get_db)):
     existing_budgie = db.query(Budgie).filter(Budgie.name == budgie.name).first()
     if existing_budgie:
         raise HTTPException(status_code=400, detail="Budgie already exists.")
@@ -51,7 +51,7 @@ async def add_budgie(budgie: BudgieInput, db: Session = Depends(get_db)):
     return {"message": f"Budgie {budgie.name} added successfully!"}
 
 @app.get("/", response_class=HTMLResponse)
-async def root():
+def root():
     db = next(get_db())
     budgies = db.query(Budgie).all()
     return generate_budgies_list_page(budgies)
@@ -83,7 +83,7 @@ def generate_budgies_list_page(budgies):
 
 
 @app.get("/{name}")
-async def get_budgie_page(name: str, db: Session = Depends(get_db)):
+def get_budgie_page(name: str, db: Session = Depends(get_db)):
     budgie = db.query(Budgie).filter(Budgie.name == name).first()
     if not budgie:
         raise HTTPException(status_code=404, detail="Budgie not found")
