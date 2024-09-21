@@ -1,20 +1,29 @@
-from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, HTTPException, Depends
+from sqlalchemy import create_engine, Column, Integer, String
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, Session
 from pydantic import BaseModel
+from starlette.responses import HTMLResponse
 from yattag import Doc
-from database import get_db, engine
-from models import Budgie, Base
-from fastapi.responses import JSONResponse
 
-import uvicorn
+DATABASE_URL = "postgresql://azaliya02:test@localhost:5432/testtest"
 
-app = FastAPI()
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
+
+class Budgie(Base):
+    __tablename__ = "budgies"
+
+    budgie_id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, index=True)
+    color = Column(String)
+    weight = Column(Integer)
+    path = Column(String)
 
 Base.metadata.create_all(bind=engine)
-@app.get("/")
-async def root():
-    return {"message": "Welcome to the Budgies Gallery API! Use /add_budgie to add a budgie."}
 
+app = FastAPI()
 
 class BudgieInput(BaseModel):
     name: str
@@ -22,24 +31,68 @@ class BudgieInput(BaseModel):
     weight: int
     path: str
 
-
-@app.get("/{name}", response_class=HTMLResponse)
-async def get_budgie_page(name: str):
-    db = next(get_db())
+def get_db():
+    db = SessionLocal()
     try:
-        budgie = db.query(Budgie).filter(Budgie.name == name).first()
-        if not budgie:
-            return JSONResponse(content={"error": "Budgie not found"}, status_code=404)
+        yield db
+    finally:
+        db.close()
 
-        html_content = generate_budgie_page(budgie)
-        return HTMLResponse(content=html_content)
-    except Exception as e:
-        return JSONResponse(content={"error": str(e)}, status_code=500)
+@app.post("/add_budgie")
+async def add_budgie(budgie: BudgieInput, db: Session = Depends(get_db)):
+    existing_budgie = db.query(Budgie).filter(Budgie.name == budgie.name).first()
+    if existing_budgie:
+        raise HTTPException(status_code=400, detail="Budgie already exists.")
 
+    new_budgie = Budgie(name=budgie.name, color=budgie.color, weight=budgie.weight, path=budgie.path)
+    db.add(new_budgie)
+    db.commit()
+    db.refresh(new_budgie)
+    return {"message": f"Budgie {budgie.name} added successfully!"}
+
+@app.get("/", response_class=HTMLResponse)
+async def root():
+    db = next(get_db())
+    budgies = db.query(Budgie).all()
+    return generate_budgies_list_page(budgies)
+
+def generate_budgies_list_page(budgies):
+    doc, tag, text = Doc().tagtext()
+
+    with tag('html'):
+        with tag('head'):
+            with tag('title'):
+                text("Budgies Gallery")
+            with tag('meta', charset="UTF-8"):
+                pass
+            with tag('style'):
+                text("""
+                body { font-family: Arial, sans-serif; text-align: center; }
+                h1 { color: #333; }
+                a { display: block; font-size: 24px; margin: 10px 0; }
+                """)
+
+        with tag('body'):
+            with tag('h1'):
+                text("Budgies List")
+            for budgie in budgies:
+                with tag('a', href=f"/{budgie.name}"):
+                    text(budgie.name)
+
+    return doc.getvalue()
+
+
+@app.get("/{name}")
+async def get_budgie_page(name: str, db: Session = Depends(get_db)):
+    budgie = db.query(Budgie).filter(Budgie.name == name).first()
+    if not budgie:
+        raise HTTPException(status_code=404, detail="Budgie not found")
+
+    html_content = generate_budgie_page(budgie)
+    return HTMLResponse(content=html_content)
 
 def generate_budgie_page(budgie):
     doc, tag, text = Doc().tagtext()
-
     with tag('html'):
         with tag('head'):
             with tag('title'):
@@ -68,17 +121,6 @@ def generate_budgie_page(budgie):
 
     return doc.getvalue()
 
-
-@app.get("/{name}", response_class=HTMLResponse)
-async def get_budgie_page(name: str):
-    db = next(get_db())
-    budgie = db.query(Budgie).filter(Budgie.name == name).first()
-    if not budgie:
-        return {"error": "Budgie not found"}
-
-    html_content = generate_budgie_page(budgie)
-    return HTMLResponse(content=html_content)
-
-
 if __name__ == "__main__":
+    import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
